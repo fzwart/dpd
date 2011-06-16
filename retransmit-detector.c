@@ -1,3 +1,9 @@
+/*	Frank Zwart [frank@frankzwart.nl]
+ *	v0.1 16/6/2011
+ *	Tool simply stores captured packets based on pcap filter and afterwards checks if there are duplicate packets in this array
+ */ 	
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <pcap.h>
@@ -43,8 +49,6 @@ void clear_pkt(struct pkt *pkt_strct)
 void store_pkt(struct pkt *pkt_strct)
 {
 	memcpy((void *)&(sent_pkts[sent_ptr]),(void *)pkt_strct,sizeof(struct pkt));
-	//memcpy((void *)&(checksum[sent_ptr]),(void *)&(pkt_strct->tcp_check),2);				/* copy 2 bytes as the check element is 2 bytes in size */
-	//memcpy((void *)((&(checksum[sent_ptr]))+2),(void *)&(pkt_strct->ip_check),2);				/* copy 2 bytes as the check element is 2 bytes in size */
 	sent_ptr++;
 }
 
@@ -55,17 +59,8 @@ int sort(const void *x, const void *y) {
 void generate_stats()
 {
 
-	/*fprintf(stdout,"Sorting checksum array");
-	qsort(checksum,pkt_cnt,sizeof(u_int16_t),sort);*/
-   
 	puts("Analysing captured packets");
 	int i,j;
-
-	/*for(i = 1 ; i < pkt_cnt; i++)
-	{
-		if(checksum[i] == checksum[i-1])
-			fprintf(stdout,"%u - %u\n",checksum[i],checksum[i-1]);
-	}*/
 
 	for(i = 0 ; i < pkt_cnt; i++)
 	{
@@ -85,8 +80,9 @@ void generate_stats()
 							dst.s_addr=htonl(sent_pkts[i].dst_ip);	
 							inet_ntop(AF_INET,&(src),ip_src,INET_ADDRSTRLEN);
 							inet_ntop(AF_INET,&(dst),ip_dst,INET_ADDRSTRLEN);
-							printf("(%s - %s)Packet1: Source: %u:%u Destination %i:%u seq: %u ack_seq: %u check: %u  check_array:\n",ip_src,ip_dst,sent_pkts[i].src_ip,sent_pkts[i].src_port,sent_pkts[i].dst_ip,sent_pkts[i].dst_port,sent_pkts[i].seq,sent_pkts[i].ack_seq,sent_pkts[i].tcp_check);
-							printf("(%s - %s)Packet2: Source: %u:%u Destination %i:%u seq: %u ack_seq: %u check: %u  check_array:\n",ip_src,ip_dst,sent_pkts[j].src_ip,sent_pkts[j].src_port,sent_pkts[j].dst_ip,sent_pkts[j].dst_port,sent_pkts[j].seq,sent_pkts[j].ack_seq,sent_pkts[j].tcp_check);
+							printf("Duplicate found..\n");
+							printf("\t* Packet1 Source: %s:%u Destination %s:%u seq: %u ack_seq: %u checksum: %u\n",ip_src,sent_pkts[i].src_port,ip_dst,sent_pkts[i].dst_port,sent_pkts[i].seq,sent_pkts[i].ack_seq,sent_pkts[i].tcp_check);
+							printf("\t* Packet2 Source: %s:%u Destination %s:%u seq: %u ack_seq: %u checksum: %u\n",ip_src,sent_pkts[j].src_port,ip_dst,sent_pkts[j].dst_port,sent_pkts[j].seq,sent_pkts[j].ack_seq,sent_pkts[j].tcp_check);
 						}
 							
 					}
@@ -99,17 +95,16 @@ void generate_stats()
 
 void process_packet(u_char *args, const struct pcap_pkthdr* pkthdr, const u_char* packet)
 {
-	//struct ether_header *eth_hdr;
 	struct ip *ip_hdr;
 	struct tcphdr *tcp_hdr;
 	int plength;
 
 	plength = pkthdr->len;
-	
-	if(plength < sizeof(struct iphdr))
+
+	if(plength < (sizeof(struct iphdr) + sizeof(struct tcphdr)))
 	{
-		printf("truncated ip %d\n",plength);
-		exit(1);
+		printf("invalid ip or tcp header length\n");
+		return 1;
 	}
 
 	ip_hdr = (struct ip *)(packet+SIZE_ETHERNET_HEADER);
@@ -133,26 +128,18 @@ void process_packet(u_char *args, const struct pcap_pkthdr* pkthdr, const u_char
 	if(tcp_hdr->ack)
 	{
 		tmp_pkt.ack_flag = 1;
-	}
+	} 
 
 	/* add packet to array for processing later on */
 	store_pkt(&tmp_pkt);
+
 	if(sent_ptr == pkt_cnt)
 	{
 		puts("Done capturing packets");
 		generate_stats();
 		exit(1);
 	}
-	/*printf("%i :%u\t\t%i :%u sequence: %u ack_seq: %u\n",tmp_pkt.src_ip,tmp_pkt.src_port,tmp_pkt.dst_ip,tmp_pkt.dst_port,tmp_pkt.seq,tmp_pkt.ack_seq);*/
-	/*struct in_addr c,d;
-	c.s_addr=htonl(tmp_pkt.src_ip);
-	d.s_addr=htonl(tmp_pkt.dst_ip);
-	char a[INET_ADDRSTRLEN];
-	char b[INET_ADDRSTRLEN];
-	inet_ntop(AF_INET,&c,a,INET_ADDRSTRLEN);
-	inet_ntop(AF_INET,&d,b,INET_ADDRSTRLEN);
-	printf("value:%s - %s\n",a,b);*/
-	
+
 	clear_pkt(&tmp_pkt);
 }
 
@@ -160,6 +147,13 @@ void process_packet(u_char *args, const struct pcap_pkthdr* pkthdr, const u_char
 int main(int argc, char *argv[])
 {
 	pcap_t *handle;
+
+	if(argc < 3 || !strcmp(argv[1],"--help"))
+	{
+	  printf("usage: ./bin <dev> <packets_to_capture>\nExample: ./bin eth0 10\n");
+	  exit(1); 
+ 	}
+
 	char *dev = argv[1];
 	pkt_cnt = atoi(argv[2]);
 	
@@ -199,7 +193,7 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
-	printf("Device: %s\n", dev);
+	printf("Capturing %i packet for Device: %s\n", pkt_cnt,dev);
 	pcap_loop(handle,pkt_cnt,process_packet,NULL);
 	pcap_close(handle);
 	exit(0);
