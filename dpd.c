@@ -1,4 +1,4 @@
-/*	Frank Zwart [frank@frankzwart.nl] 
+/*	Frank Zwart [frank@frankzwart.nl]  [blaataap]
  *	v0.1 16/6/2011
  *	Tool simply stores captured packets based on pcap filter and afterwards checks if there are duplicate packets in this array
  */ 	
